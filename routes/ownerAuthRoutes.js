@@ -45,79 +45,108 @@ router.post("/reset-password/:token", updatePassword);
 router.get(
   "/google",
   (req, res, next) => {
+    // Store the referrer URL for post-authentication redirect
     req.session.returnTo = req.headers.referer;
     next();
   },
-  passport.authenticate("google", {
+  passport.authenticate("google-owner", {
+    // Changed to google-owner to distinguish from student auth
     scope: ["profile", "email"],
     prompt: "select_account",
   })
 );
 
 router.get("/google/callback", (req, res, next) => {
-  passport.authenticate("google", async (err, user, info) => {
+  passport.authenticate("google-owner", async (err, user, info) => {
     try {
+      // Error handling
       if (err) {
-        console.error("Passport authentication error:", err);
+        console.error("Authentication error:", err);
         return res.redirect(
-          `${process.env.FRONTEND_URL}/login?error=auth_failed`
+          `${
+            process.env.FRONTEND_URL
+          }/hostelownerlogin?error=${encodeURIComponent(err.message)}`
         );
       }
 
+      // No user returned
       if (!user) {
-        console.error("No user returned from authentication");
-        return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_user`);
+        console.error(
+          "Authentication failed:",
+          info?.message || "No user returned"
+        );
+        return res.redirect(
+          `${process.env.FRONTEND_URL}/hostelownerlogin?error=authentication_failed`
+        );
       }
 
-      // Log the user object to debug
-      console.log("Authenticated user:", user);
+      // Debug log
+      console.log("Authenticated owner:", {
+        id: user._id,
+        email: user.email,
+        name: user.name,
+      });
 
-      // Manually log in the user
+      // Login user
       req.logIn(user, async (loginErr) => {
         if (loginErr) {
           console.error("Login error:", loginErr);
           return res.redirect(
-            `${process.env.FRONTEND_URL}/login?error=login_failed`
+            `${process.env.FRONTEND_URL}/hostelownerlogin?error=login_failed`
           );
         }
 
         try {
-          // Generate JWT token
+          // Generate JWT token with owner-specific claims
           const token = jwt.sign(
             {
               id: user._id,
               role: "hostelOwner",
               email: user.email,
+              name: user.name,
+              verified: user.verified,
             },
             process.env.JWT_SECRET,
-            { expiresIn: "24h" }
+            {
+              expiresIn: "24h",
+              algorithm: "HS256",
+            }
           );
 
-          // Construct redirect URL with proper error handling
+          // Construct redirect URL
           const redirectUrl = new URL(
             `${process.env.FRONTEND_URL}/oauth-success`
           );
 
-          // Safely add parameters
-          redirectUrl.searchParams.append("token", token);
-          redirectUrl.searchParams.append("role", "hostelOwner");
-          redirectUrl.searchParams.append(
-            "profileId",
-            user._id ? user._id.toString() : ""
-          );
-          redirectUrl.searchParams.append("email", user.email || "");
-          redirectUrl.searchParams.append("name", user.name || "");
+          // Add parameters with proper encoding
+          const params = {
+            token,
+            role: "hostelOwner",
+            profileId: user._id?.toString() || "",
+            email: user.email || "",
+            name: user.name || "",
+            verified: user.verified ? "true" : "false",
+          };
+
+          // Safely append all parameters
+          Object.entries(params).forEach(([key, value]) => {
+            redirectUrl.searchParams.append(key, encodeURIComponent(value));
+          });
 
           // Redirect to frontend
-          res.redirect(redirectUrl.toString());
-        } catch (error) {
-          console.error("Token generation error:", error);
-          res.redirect(`${process.env.FRONTEND_URL}/login?error=token_failed`);
+          return res.redirect(redirectUrl.toString());
+        } catch (tokenError) {
+          console.error("Token generation error:", tokenError);
+          return res.redirect(
+            `${process.env.FRONTEND_URL}/hostelownerlogin?error=token_generation_failed`
+          );
         }
       });
-    } catch (error) {
-      console.error("Callback error:", error);
-      res.redirect(`${process.env.FRONTEND_URL}/login?error=callback_failed`);
+    } catch (callbackError) {
+      console.error("Callback processing error:", callbackError);
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/hostelownerlogin?error=callback_processing_failed`
+      );
     }
   })(req, res, next);
 });

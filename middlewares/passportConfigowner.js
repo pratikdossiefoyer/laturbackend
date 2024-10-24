@@ -24,6 +24,7 @@ const configurePassportowner = (hostelOwnerDB, commonDB) => {
   });
 
   passport.use(
+    "google-owner",
     new GoogleStrategy(
       {
         clientID: process.env.Owner_GOOGLE_CLIENT_ID,

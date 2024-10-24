@@ -190,35 +190,90 @@ const connectToDatabases = async () => {
   }
 };
 
-// Server startup function
 const startServer = async () => {
   try {
+    // Connect to databases
+    console.log("Connecting to databases...");
     const { studentDB, hostelOwnerDB, commonDB } = await connectToDatabases();
+    console.log("Database connections established successfully");
 
-    app.locals.studentDB = studentDB;
-    app.locals.hostelOwnerDB = hostelOwnerDB;
-    app.locals.commonDB = commonDB;
+    // Set database instances in app.locals
+    app.locals = {
+      ...app.locals,
+      studentDB,
+      hostelOwnerDB,
+      commonDB,
+    };
 
+    // Configure session before passport
+    app.use(
+      session({
+        secret: process.env.SESSION_SECRET,
+        resave: false,
+        saveUninitialized: false,
+        cookie: {
+          secure: process.env.NODE_ENV === "production",
+          httpOnly: true,
+          maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        },
+        store: new MongoStore({
+          mongoUrl: process.env.COMMON_DB_URI,
+          collection: "sessions",
+        }),
+      })
+    );
+
+    // Configure passports
+    console.log("Configuring passport strategies...");
+
+    // Student passport configuration
     const passportInstance = configurePassport(studentDB, commonDB);
+    if (!passportInstance) {
+      throw new Error("Failed to configure student passport");
+    }
     app.use(passportInstance.initialize());
     app.use(passportInstance.session());
 
+    // Owner passport configuration
     const passportInstanceowner = configurePassportowner(
       hostelOwnerDB,
       commonDB
     );
+    if (!passportInstanceowner) {
+      throw new Error("Failed to configure owner passport");
+    }
     app.use(passportInstanceowner.initialize());
     app.use(passportInstanceowner.session());
 
-    await initDBB(studentDB, hostelOwnerDB, commonDB);
-    await initDB(studentDB, hostelOwnerDB, commonDB);
+    console.log("Passport strategies configured successfully");
+
+    // Initialize databases
+    console.log("Initializing databases...");
+    await Promise.all([
+      initDBB(studentDB, hostelOwnerDB, commonDB),
+      initDB(studentDB, hostelOwnerDB, commonDB),
+    ]);
+    console.log("Databases initialized successfully");
+
+    // Middleware for route logging
+    app.use((req, res, next) => {
+      console.log(`${req.method} ${req.path}`);
+      next();
+    });
 
     // Routes
-    app.use("/api/auth/student", studentAuthRoutes);
-    app.use("/api/auth/owner", ownerAuthRoutes);
-    app.use("/api/hostels", hostelRoutes);
-    app.use("/api/students", studentRoutes);
-    app.use("/api/admin", adminRoutes);
+    const routes = [
+      { path: "/api/auth/student", router: studentAuthRoutes },
+      { path: "/api/auth/owner", router: ownerAuthRoutes },
+      { path: "/api/hostels", router: hostelRoutes },
+      { path: "/api/students", router: studentRoutes },
+      { path: "/api/admin", router: adminRoutes },
+    ];
+
+    routes.forEach(({ path, router }) => {
+      app.use(path, router);
+      console.log(`Route registered: ${path}`);
+    });
 
     // Basic route
     /**
@@ -239,20 +294,66 @@ const startServer = async () => {
       res.send("Welcome to the Hostel Backend API");
     });
 
-    server.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on port ${PORT}`);
-      console.log(
-        `Swagger documentation available at http://localhost:${PORT}/api-docs`
-      );
+    // Error handling middleware
+    app.use((err, req, res, next) => {
+      console.error("Error:", err);
+      res.status(err.status || 500).json({
+        error:
+          process.env.NODE_ENV === "production"
+            ? "Internal server error"
+            : err.message,
+      });
     });
+
+    // Start server
+    const serverInstance = server.listen(PORT, "0.0.0.0", () => {
+      console.log(`
+        🚀 Server is running!
+        🔊 Listening on port ${PORT}
+        📚 Swagger docs: http://localhost:${PORT}/api-docs
+        🌍 Environment: ${process.env.NODE_ENV}
+      `);
+    });
+
+    // Handle graceful shutdown
+    const gracefulShutdown = async () => {
+      console.log("\nStarting graceful shutdown...");
+      try {
+        await serverInstance.close();
+        console.log("Server closed");
+
+        // Close database connections
+        await studentDB.close();
+        await hostelOwnerDB.close();
+        await commonDB.close();
+        console.log("Database connections closed");
+
+        process.exit(0);
+      } catch (error) {
+        console.error("Error during shutdown:", error);
+        process.exit(1);
+      }
+    };
+
+    process.on("SIGTERM", gracefulShutdown);
+    process.on("SIGINT", gracefulShutdown);
   } catch (error) {
     console.error("Failed to start server:", error);
+    console.error("Stack trace:", error.stack);
     process.exit(1);
   }
 };
 
-startServer();
+// Unhandled rejection handler
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+});
 
+// Start the server
+startServer().catch((error) => {
+  console.error("Failed to start application:", error);
+  process.exit(1);
+});
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
