@@ -39,27 +39,18 @@ const configurePassportowner = (hostelOwnerDB, commonDB) => {
           // Get owner role
           const ownerRole = await Role.findOne({ name: "hostelOwner" });
           if (!ownerRole) {
-            console.error("Owner role not found");
-            return done(new Error("Owner role not found"));
+            return done(new Error("Owner role not found in database"));
           }
 
-          // Check for existing owner
+          // Find or create user with proper error handling
           let owner = await Owner.findOne({ googleId: profile.id });
 
-          if (owner) {
-            console.log("Found existing owner by googleId:", owner);
-            if (!owner.role) {
-              owner.role = ownerRole;
-              await owner.save();
-            }
-            return done(null, owner);
+          if (!owner) {
+            owner = await Owner.findOne({ email: profile.emails[0].value });
           }
 
-          // Check by email
-          owner = await Owner.findOne({ email: profile.emails[0].value });
-
           if (owner) {
-            console.log("Found existing owner by email:", owner);
+            // Update existing owner
             owner.googleId = profile.id;
             owner.verified = true;
             owner.authProvider = "google";
@@ -67,25 +58,23 @@ const configurePassportowner = (hostelOwnerDB, commonDB) => {
               owner.role = ownerRole;
             }
             await owner.save();
-            return done(null, owner);
+          } else {
+            // Create new owner
+            owner = await Owner.create({
+              _id: new mongoose.Types.ObjectId(),
+              googleId: profile.id,
+              email: profile.emails[0].value,
+              name: profile.displayName,
+              verified: true,
+              authProvider: "google",
+              role: ownerRole,
+            });
           }
 
-          // Create new Owner
-          const newOwner = await Owner.create({
-            _id: new mongoose.Types.ObjectId(),
-            googleId: profile.id,
-            email: profile.emails[0].value,
-            name: profile.displayName,
-            verified: true,
-            authProvider: "google",
-            role: ownerRole,
-          });
-
-          console.log("Created new owner:", newOwner);
-          return done(null, newOwner);
+          return done(null, owner);
         } catch (error) {
           console.error("Google authentication error:", error);
-          return done(error, null);
+          return done(error);
         }
       }
     )

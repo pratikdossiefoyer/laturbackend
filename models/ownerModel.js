@@ -41,7 +41,7 @@ const ownerSchema = new mongoose.Schema({
   googleId: String,
   facebookId: String,
   instagramId: String,
-  authProvider: { type: String, enum: ["local", "google"], default: "local" },
+  authProvider: String,
   // Owner-specific fields
   name: { type: String, required: false },
   number: { type: String, required: false },
