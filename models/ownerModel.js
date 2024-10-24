@@ -41,7 +41,7 @@ const ownerSchema = new mongoose.Schema({
   googleId: String,
   facebookId: String,
   instagramId: String,
-
+  authProvider: { type: String, enum: ["local", "google"], default: "local" },
   // Owner-specific fields
   name: { type: String, required: false },
   number: { type: String, required: false },
@@ -114,7 +114,7 @@ export const initOwnerModel = (ownerDB, commonDB) => {
   Owner.prototype.toJSON = function () {
     var obj = this.toObject();
     if (obj.role && typeof obj.role !== "string") {
-      obj.role = obj.role.name; // Assuming the role has a 'name' field
+      obj.role = obj.role.name;
     }
     return obj;
   };
